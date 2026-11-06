@@ -1,0 +1,28 @@
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large model weights and local caches
+models/
+.cache/
+
+# Logs and runtime artifacts
+logs/
+*.log
+board/
+
+# Experimental / diagnostic scratch files
+_*
+*.bak*
+
+# Operating system / IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

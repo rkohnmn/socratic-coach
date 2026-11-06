@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en" data-state="idle">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>SocraticCoach - Studio HUD</title>
+<style>
+/* ==========================================================================
+   SocraticCoach Studio System - design tokens (DESIGN.md 3)
+   Elevation is expressed with 1px borders + surface lightness only.
+   No glassmorphism, no backdrop-filter, no decorative blur.
+   ========================================================================== */
+:root {
+  /* surfaces, darkest -> lightest */
+  --bg:            oklch(0.17 0.015 260);
+  --surface:       oklch(0.21 0.018 260);
+  --surface-2:     oklch(0.25 0.020 260);
+  --surface-3:     oklch(0.29 0.022 260);
+  --border:        oklch(0.32 0.020 260);
+  --border-strong: oklch(0.42 0.024 260);
+
+  /* text */
+  --fg:            oklch(0.95 0.010 260);
+  --fg-muted:      oklch(0.72 0.014 260);
+  --fg-dim:        oklch(0.56 0.014 260);
+
+  /* semantic status hues - exclusive, never decorative */
+  --accent:        oklch(0.70 0.13 250);   /* primary action / info   */
+  --listen:        oklch(0.78 0.16 155);   /* green  = listening      */
+  --think:         oklch(0.80 0.15 85);    /* amber  = thinking       */
+  --speak:         oklch(0.72 0.17 300);   /* violet = speaking       */
+  --mute:          oklch(0.68 0.19 25);    /* red    = muted / error  */
+
+  --accent-quiet:  oklch(0.70 0.13 250 / 0.14);
+  --listen-quiet:  oklch(0.78 0.16 155 / 0.14);
+  --think-quiet:   oklch(0.80 0.15 85  / 0.14);
+  --speak-quiet:   oklch(0.72 0.17 300 / 0.14);
+  --mute-quiet:    oklch(0.68 0.19 25  / 0.14);
+
+  /* type scale */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --fs-xs: 0.6875rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.875rem;
+  --fs-lg: 1.0625rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: 1.75rem;
+
+  /* 8px spatial system */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --header-h: 48px;
+  --control-h: 88px;
+
+  /* motion - short, purposeful, compositor-only */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
+
+  --shadow-lift: 0 6px 20px oklch(0.10 0.02 260 / 0.45);
+
+  /* state-driven accents, remapped by [data-state] below */
+  --state-hue: var(--fg-muted);
+  --state-quiet: var(--accent-quiet);
+}
+
+html[data-state="listening"] { --state-hue: var(--listen); --state-quiet: var(--listen-quiet); }
+html[data-state="thinking"]  { --state-hue: var(--think);  --state-quiet: var(--think-quiet); }
+html[data-state="speaking"]  { --state-hue: var(--speak);  --state-quiet: var(--speak-quiet); }
+html[data-state="muted"]     { --state-hue: var(--mute);   --state-quiet: var(--mute-quiet); }
+html[data-state="idle"]      { --state-hue: var(--fg-muted); }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::selection { background: var(--accent-quiet); }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.skip-link {
+  position: absolute; left: var(--sp-4); top: -100px;
+  z-index: 100; padding: var(--sp-2) var(--sp-4);
+  background: var(--surface-3); color: var(--fg);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  text-decoration: none; font-size: var(--fs-sm);
+  transition: top var(--dur-fast) var(--ease);
+}
+.skip-link:focus { top: var(--sp-2); }
+
+/* ==========================================================================
+   Shell: 48px header / 1fr stage / 88px control strip (DESIGN.md 5)
+   ========================================================================== */
+.app {
+  display: grid;
+  grid-template-rows: var(--header-h) 1fr var(--control-h);
+  height: 100vh;
+}
+
+/* ---- header ---------------------------------------------------------- */
+.hdr {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: 0 var(--sp-5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.hdr__brand {
+  display: flex; align-items: baseline; gap: var(--sp-2);
+  font-weight: 600; letter-spacing: 0.01em;
+}
+.hdr__mark {
+  color: var(--state-hue);
+  transition: color var(--dur-base) var(--ease);
+}
+.hdr__title { font-size: var(--fs-md); }
+.hdr__sub { font-size: var(--fs-xs); color: var(--fg-dim); }
+.hdr__spacer { flex: 1; }
+.hdr__facts { display: flex; align-items: center; gap: var(--sp-4); }
+
+.fact {
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: 1px; min-width: 62px;
+}
+.fact__k {
+  font-size: var(--fs-xs); text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--fg-dim);
+}
+.fact__v {
+  font-family: var(--font-mono); font-size: var(--fs-sm);
+  color: var(--fg-muted); font-variant-numeric: tabular-nums;
+}
+.fact__v[data-warn="1"] { color: var(--think); }
+.fact__v[data-bad="1"] { color: var(--mute); }
+
+/* status pill - single source of truth for system state */
+.pill {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  min-height: 26px;
+  background: var(--state-quiet);
+  border: 1px solid var(--state-hue);
+  border-radius: 999px;
+  font-size: var(--fs-xs); font-weight: 600;
+  letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--state-hue);
+  transition: background var(--dur-base) var(--ease),
+              border-color var(--dur-base) var(--ease),
+              color var(--dur-base) var(--ease);
+}
+.pill__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+html[data-state="idle"] .pill__dot { opacity: 0.45; }
+
+/* ---- stage: 12-col grid, 8-col transcript + 4-col rail ---------------- */
+.stage {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--sp-5);
+  padding: var(--sp-5);
+  min-height: 0;
+  overflow: hidden;
+}
+.col-main { grid-column: span 8; display: flex; flex-direction: column;
+            gap: var(--sp-5); min-height: 0; min-width: 0; }
+.col-rail { grid-column: span 4; display: flex; flex-direction: column;
+            gap: var(--sp-5); min-height: 0; min-width: 0; }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.panel__hd {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--fg-dim);
+  flex: 0 0 auto;
+}
+.panel__hd .spacer { flex: 1; }
+.panel__bd { overflow: auto; padding: var(--sp-4); min-height: 0; flex: 1 1 auto; }
+.count-chip {
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+  color: var(--fg-dim); text-transform: none; letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- transcript feed (DESIGN.md 7.3) --------------------------------- */
+.feed { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.line {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  animation: line-in var(--dur-slow) var(--ease) both;
+}
+.line:last-child { border-bottom: 0; }
+.line__meta {
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+  color: var(--fg-dim); font-variant-numeric: tabular-nums;
+  padding-top: 3px;
+}
+.line__text { font-size: var(--fs-lg); line-height: 1.45; }
+.line__sub {
+  font-size: var(--fs-xs); color: var(--fg-dim);
+  font-family: var(--font-mono); margin-top: 2px;
+}
+/* lines older than 60s recede without losing contrast compliance */
+.line.is-historical .line__text { color: var(--fg-muted); }
+.line.is-historical .line__meta { opacity: 0.7; }
+
+@keyframes line-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.empty { color: var(--fg-dim); font-size: var(--fs-sm); padding: var(--sp-4) 0; }
+
+/* ---- question alert (DESIGN.md 7.1 / 8) ------------------------------ */
+.alert {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--sp-4) var(--sp-5);
+  transition: border-color var(--dur-base) var(--ease),
+              background var(--dur-base) var(--ease);
+}
+.alert[data-active="1"] {
+  border-color: var(--speak);
+  border-left-color: var(--speak);
+  background: var(--surface-2);
+  animation: alert-in var(--dur-slow) var(--ease-spring) both;
+}
+.alert__k {
+  font-size: var(--fs-xs); text-transform: uppercase;
+  letter-spacing: 0.09em; color: var(--fg-dim); margin-bottom: var(--sp-2);
+}
+.alert[data-active="1"] .alert__k { color: var(--speak); }
+.alert__q { font-size: var(--fs-xl); line-height: 1.35; font-weight: 500; }
+.alert__q.is-placeholder {
+  color: var(--fg-dim); font-weight: 400; font-size: var(--fs-md);
+}
+.alert__ft {
+  display: flex; align-items: center; gap: var(--sp-3);
+  margin-top: var(--sp-3);
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+  color: var(--fg-dim); font-variant-numeric: tabular-nums;
+}
+@keyframes alert-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---- waveform (DESIGN.md 7.4) ---------------------------------------- */
+.wave-wrap { position: relative; flex: 0 0 auto; }
+#wave { display: block; width: 100%; height: 92px; }
+.wave-note {
+  position: absolute; inset: 0;
+  display: none; align-items: center; justify-content: center;
+  font-size: var(--fs-sm); color: var(--fg-dim);
+  text-align: center; padding: var(--sp-3);
+}
+.wave-wrap[data-available="0"] .wave-note { display: flex; }
+.wave-wrap[data-available="0"] #wave { opacity: 0.25; }
+
+/* ---- board panel ------------------------------------------------------ */
+.board { display: flex; flex-direction: column; gap: var(--sp-4); }
+.board__sec { display: flex; flex-direction: column; gap: var(--sp-2); }
+.board__k {
+  font-size: var(--fs-xs); text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--fg-dim);
+}
+.eq {
+  font-family: var(--font-mono); font-size: var(--fs-md);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3);
+  overflow-x: auto; white-space: nowrap;
+}
+.tag-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.tag {
+  font-size: var(--fs-xs); padding: 2px var(--sp-2);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--fg-muted);
+}
+
+/* ---- control strip (DESIGN.md 6.5) ----------------------------------- */
+.ctrl {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: 0 var(--sp-5);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  min-height: 44px; padding: 0 var(--sp-4);
+  background: var(--surface-3); color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui); font-size: var(--fs-sm); font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease);
+}
+.btn:hover { background: var(--border-strong); }
+.btn:active { transform: translateY(1px); }
+.btn[disabled] { opacity: 0.4; cursor: default; }
+.btn--accent {
+  background: var(--accent-quiet); border-color: var(--accent); color: var(--accent);
+}
+.btn--accent:hover { background: oklch(0.70 0.13 250 / 0.22); }
+.btn--danger {
+  background: var(--mute-quiet); border-color: var(--mute); color: var(--mute);
+}
+.btn--danger:hover { background: oklch(0.68 0.19 25 / 0.22); }
+.btn__key {
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+  opacity: 0.65; border-left: 1px solid currentColor;
+  padding-left: var(--sp-2); margin-left: var(--sp-1);
+}
+.ctrl__spacer { flex: 1; }
+.ctrl__hint { font-size: var(--fs-xs); color: var(--fg-dim); }
+
+/* ---- metrics + connection -------------------------------------------- */
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.metric {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3);
+}
+.metric__k {
+  font-size: var(--fs-xs); color: var(--fg-dim);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.metric__v {
+  font-family: var(--font-mono); font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+.metric__v[data-ok="1"] { color: var(--listen); }
+.metric__v[data-over="1"] { color: var(--think); }
+
+.conn {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-size: var(--fs-xs); color: var(--fg-dim);
+}
+.conn__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-dim); }
+.conn[data-live="1"] .conn__dot { background: var(--listen); }
+.conn[data-live="0"] .conn__dot { background: var(--mute); }
+
+.errbox {
+  display: none;
+  border: 1px solid var(--mute); border-left-width: 3px;
+  background: var(--mute-quiet);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm); color: var(--fg);
+  margin-bottom: var(--sp-3);
+}
+.errbox[data-show="1"] { display: block; }
+.errbox__item + .errbox__item { margin-top: var(--sp-2); }
+
+/* reduced motion: keep state legible, drop the movement (DESIGN.md 10) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* narrow windows: rail moves under the main column */
+@media (max-width: 1180px) {
+  .col-main, .col-rail { grid-column: span 12; }
+  .stage { overflow: auto; }
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#feed">Skip to transcript</a>
+
+<div class="app">
+  <!-- ================= header (48px) ================= -->
+  <header class="hdr">
+    <div class="hdr__brand">
+      <span class="hdr__mark" aria-hidden="true">&#9679;</span>
+      <span class="hdr__title">SocraticCoach</span>
+      <span class="hdr__sub">studio hud</span>
+    </div>
+
+    <div class="pill" role="status" aria-live="polite">
+      <span class="pill__dot" aria-hidden="true"></span>
+      <span id="stateWord">idle</span>
+    </div>
+
+    <div class="hdr__spacer"></div>
+
+    <div class="hdr__facts">
+      <div class="fact">
+        <span class="fact__k">model</span>
+        <span class="fact__v" id="factModel">&mdash;</span>
+      </div>
+      <div class="fact">
+        <span class="fact__k">vram</span>
+        <span class="fact__v" id="factVram">&mdash;</span>
+      </div>
+      <div class="fact">
+        <span class="fact__k">cpu</span>
+        <span class="fact__v" id="factCpu">&mdash;</span>
+      </div>
+      <div class="fact">
+        <span class="fact__k">uptime</span>
+        <span class="fact__v" id="factUptime">0:00</span>
+      </div>
+      <div class="conn" id="conn" data-live="0">
+        <span class="conn__dot" aria-hidden="true"></span>
+        <span id="connText">connecting</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= stage ================= -->
+  <main class="stage">
+    <section class="col-main" aria-label="Lecture capture">
+      <!-- question alert -->
+      <div class="alert" id="alert" data-active="0">
+        <div class="alert__k" id="alertKind">student question</div>
+        <div class="alert__q is-placeholder" id="alertText">
+          Waiting for a qualifying lecture turn&hellip;
+        </div>
+        <div class="alert__ft" id="alertFoot"></div>
+      </div>
+
+      <!-- transcript -->
+      <div class="panel" style="flex:1 1 auto;">
+        <div class="panel__hd">
+          <span>teacher transcript</span>
+          <span class="spacer"></span>
+          <span class="count-chip" id="feedCount">0 lines</span>
+        </div>
+        <div class="panel__bd">
+          <div class="errbox" id="errbox" data-show="0"></div>
+          <div id="feed" class="feed" tabindex="0" aria-label="Transcript feed">
+            <div class="empty" id="feedEmpty">
+              Listening for the first utterance&hellip;
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="col-rail" aria-label="Instrumentation">
+      <!-- waveform -->
+      <div class="panel">
+        <div class="panel__hd">
+          <span>microphone energy</span>
+          <span class="spacer"></span>
+          <span class="count-chip" id="floorChip">floor &mdash;</span>
+        </div>
+        <div class="panel__bd" style="padding:0;">
+          <div class="wave-wrap" id="waveWrap" data-available="0">
+            <canvas id="wave" width="640" height="92"
+                    role="img" aria-label="Live microphone level"></canvas>
+            <div class="wave-note" id="waveNote">
+              level unavailable &mdash; microphone not running
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- metrics -->
+      <div class="panel">
+        <div class="panel__hd"><span>cycle latency</span></div>
+        <div class="panel__bd">
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric__k">stt</div>
+              <div class="metric__v" id="mStt">&mdash;</div>
+            </div>
+            <div class="metric">
+              <div class="metric__k">llm</div>
+              <div class="metric__v" id="mLlm">&mdash;</div>
+            </div>
+            <div class="metric">
+              <div class="metric__k">tts first</div>
+              <div class="metric__v" id="mTts">&mdash;</div>
+            </div>
+            <div class="metric">
+              <div class="metric__k">total</div>
+              <div class="metric__v" id="mTotal">&mdash;</div>
+            </div>
+            <div class="metric">
+              <div class="metric__k">avg / best</div>
+              <div class="metric__v" id="mAvg">&mdash;</div>
+            </div>
+            <div class="metric">
+              <div class="metric__k">within 1.5s</div>
+              <div class="metric__v" id="mWithin">&mdash;</div>
+            </div>
+          </div>
+          <div class="metrics"
+               style="margin-top:var(--sp-3); grid-template-columns:1fr 1fr 1fr;">
+            <div class="metric">
+              <div class="metric__k">turns</div>
+              <div class="metric__v" id="cTurns">0</div>
+            </div>
+            <div class="metric">
+              <div class="metric__k">asked</div>
+              <div class="metric__v" id="cAsked">0</div>
+            </div>
+            <div class="metric">
+              <div class="metric__k">gated</div>
+              <div class="metric__v" id="cGated">0</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- board -->
+      <div class="panel" style="flex:1 1 auto;">
+        <div class="panel__hd">
+          <span>whiteboard</span>
+          <span class="spacer"></span>
+          <span class="count-chip" id="boardChip">no feed</span>
+        </div>
+        <div class="panel__bd">
+          <div class="board" id="board">
+            <div class="empty">
+              No board feed. Run
+              <code>vision_tracker.py --web-publish</code> in a second window.
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ================= control strip (88px) ================= -->
+  <footer class="ctrl">
+    <button class="btn btn--accent" id="btnAsk" type="button"
+            title="Generate one question from the current transcript window">
+      Ask now<span class="btn__key">A</span>
+    </button>
+    <button class="btn" id="btnMute" type="button"
+            title="Pause listening while you talk privately">
+      Pause mic<span class="btn__key">M</span>
+    </button>
+    <button class="btn" id="btnSkip" type="button"
+            title="Dismiss the current question banner">
+      Dismiss<span class="btn__key">D</span>
+    </button>
+    <button class="btn" id="btnClear" type="button" title="Clear the feed">
+      Clear feed<span class="btn__key">C</span>
+    </button>
+    <button class="btn btn--danger" id="btnStop" type="button"
+            title="End the session and write the summary">
+      Stop session<span class="btn__key">S</span>
+    </button>
+    <span class="ctrl__spacer"></span>
+    <span class="ctrl__hint" id="ctrlHint">
+      Space&nbsp;pause&nbsp;&middot;&nbsp;A&nbsp;ask&nbsp;&middot;&nbsp;D&nbsp;dismiss&nbsp;&middot;&nbsp;S&nbsp;stop
+    </span>
+  </footer>
+</div>
+
+<div class="visually-hidden" role="alert" aria-live="assertive" id="liveAlert"></div>
+<script>
+/* ==========================================================================
+   SocraticCoach HUD client - vanilla ES2020, zero dependencies.
+
+   Transport : EventSource('/events') - SSE snapshot + deltas, 20 Hz telemetry.
+   Commands  : POST /api/action {action:'ask'|'mute'|'unmute'|'dismiss'|...}
+   Safety    : textContent only, never innerHTML - transcript text originates
+               from a microphone and must never be parsed as markup.
+   Honesty   : DESIGN.md 10 - if the microphone reports no energy the meter is
+               replaced by an explicit unavailable notice, never a fake idle.
+   ========================================================================== */
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+
+const els = {
+  root: document.documentElement,
+  stateWord: $('stateWord'),
+  conn: $('conn'), connText: $('connText'),
+  factModel: $('factModel'), factVram: $('factVram'),
+  factCpu: $('factCpu'), factUptime: $('factUptime'),
+  alert: $('alert'), alertKind: $('alertKind'),
+  alertText: $('alertText'), alertFoot: $('alertFoot'),
+  feed: $('feed'), feedEmpty: $('feedEmpty'), feedCount: $('feedCount'),
+  errbox: $('errbox'),
+  wave: $('wave'), waveWrap: $('waveWrap'), waveNote: $('waveNote'),
+  floorChip: $('floorChip'),
+  board: $('board'), boardChip: $('boardChip'),
+  liveAlert: $('liveAlert'),
+  btnAsk: $('btnAsk'), btnMute: $('btnMute'), btnSkip: $('btnSkip'),
+  btnClear: $('btnClear'), btnStop: $('btnStop'),
+  mStt: $('mStt'), mLlm: $('mLlm'), mTts: $('mTts'), mTotal: $('mTotal'),
+  mAvg: $('mAvg'), mWithin: $('mWithin'),
+  cTurns: $('cTurns'), cAsked: $('cAsked'), cGated: $('cGated'),
+};
+
+const LEVEL_BARS = 64;          // must match webui.LEVEL_BARS
+const MAX_LINES = 300;          // DOM cap; the server retains 500 for late joins
+const HIST_MS = 60000;          // DESIGN.md 7.3 - older lines recede
+const ALERT_MS = 2000;          // DESIGN.md 7.1 - question banner auto-dismiss
+const EM = '\u2014';
+
+const view = {
+  levels: new Array(LEVEL_BARS).fill(0),
+  shown: new Array(LEVEL_BARS).fill(0),
+  levelsAvailable: false,
+  floor: null,
+  startedTs: null,
+  muted: false,
+  lines: 0,
+  alertTimer: 0,
+  es: null,
+  retryMs: 1000,
+};
+
+/* ---- formatting --------------------------------------------------------- */
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function clockText(ts) {
+  const d = ts ? new Date(ts * 1000) : new Date();
+  return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' +
+    pad2(d.getSeconds());
+}
+
+function msText(v) {
+  const n = Number(v);
+  if (v === null || v === undefined || v === '' || !isFinite(n) || n <= 0) {
+    return EM;
+  }
+  return n >= 1000 ? (n / 1000).toFixed(2) + 's' : Math.round(n) + 'ms';
+}
+
+function clockDuration(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h ? `${h}:${pad2(m)}:${pad2(sec)}` : `${m}:${pad2(sec)}`;
+}
+
+function put(el, text) {
+  if (el && el.textContent !== text) el.textContent = text;
+}
+
+/* Buttons carry a <span class="btn__key"> badge, so only the leading text
+   node may be rewritten - setting textContent would delete the badge. */
+function setBtnLabel(btn, text) {
+  if (!btn || !btn.firstChild) return;
+  if (btn.firstChild.nodeType === 3 && btn.firstChild.nodeValue !== text) {
+    btn.firstChild.nodeValue = text;
+  }
+}
+
+/* ---- state (DESIGN.md 7.2) --------------------------------------------- */
+function applyState(state, note) {
+  const word = note || state || 'idle';
+  view.muted = state === 'muted';
+  els.root.setAttribute('data-state', state || 'idle');
+  put(els.stateWord, word);
+  put(els.connText, els.conn.getAttribute('data-live') === '1'
+    ? word : 'reconnecting');
+  setBtnLabel(els.btnMute, view.muted ? 'Resume mic' : 'Pause mic');
+  if (els.btnMute) els.btnMute.setAttribute('aria-pressed',
+    view.muted ? 'true' : 'false');
+  // the alert is the student's own question; drop the banner if we resumed
+  if (state !== 'speaking' && state !== 'thinking') hideAlert(7000);
+}
+
+function setConn(live) {
+  els.conn.setAttribute('data-live', live ? '1' : '0');
+  els.connText.textContent = live
+    ? (els.stateWord.textContent || 'connected') : 'reconnecting';
+}
+
+/* ---- transcript feed (DESIGN.md 7.3) ----------------------------------- */
+function addLine(rec) {
+  if (!rec || typeof rec.text !== 'string') return;
+  if (els.feedEmpty) { els.feedEmpty.remove(); els.feedEmpty = null; }
+
+  const line = document.createElement('article');
+  line.className = 'line';
+  line.dataset.ts = String(rec.ts || Date.now() / 1000);
+
+  const meta = document.createElement('div');
+  meta.className = 'line__meta';
+  meta.textContent = clockText(rec.ts);
+
+  const body = document.createElement('div');
+
+  const text = document.createElement('div');
+  text.className = 'line__text';
+  text.textContent = rec.text;              // mic text: never as markup
+
+  body.appendChild(text);
+
+  const bits = [];
+  if (rec.audio_s) bits.push(`${Number(rec.audio_s).toFixed(2)}s audio`);
+  if (rec.stt_ms) bits.push(`stt ${msText(rec.stt_ms)}`);
+  if (rec.seq) bits.push(`#${rec.seq}`);
+  if (bits.length) {
+    const sub = document.createElement('div');
+    sub.className = 'line__sub';
+    sub.textContent = bits.join('  \u00b7  ');
+    body.appendChild(sub);
+  }
+
+  line.appendChild(meta);
+  line.appendChild(body);
+  els.feed.appendChild(line);
+
+  view.lines += 1;
+  while (els.feed.childElementCount > MAX_LINES) {
+    els.feed.removeChild(els.feed.firstElementChild);
+  }
+  put(els.feedCount, `${view.lines} line${view.lines === 1 ? '' : 's'}`);
+
+  // only auto-scroll when the reader is already at the bottom
+  const near = els.feed.scrollHeight - els.feed.scrollTop -
+    els.feed.clientHeight;
+  if (near < 80) els.feed.scrollTop = els.feed.scrollHeight;
+}
+
+function ageLines() {
+  const now = Date.now() / 1000;
+  for (const node of els.feed.children) {
+    const ts = Number(node.dataset.ts || 0);
+    if (ts && now - ts > HIST_MS / 1000) node.classList.add('is-historical');
+  }
+}
+
+function clearFeed() {
+  while (els.feed.firstChild) els.feed.removeChild(els.feed.firstChild);
+  const empty = document.createElement('div');
+  empty.className = 'empty';
+  empty.id = 'feedEmpty';
+  empty.textContent = 'Feed cleared - listening for the next utterance\u2026';
+  els.feed.appendChild(empty);
+  els.feedEmpty = empty;
+  view.lines = 0;
+  put(els.feedCount, '0 lines');
+}
+
+/* ---- question alert (DESIGN.md 7.1 / 8) -------------------------------- */
+function showQuestion(q) {
+  if (!q || !q.text) return;
+  els.alert.setAttribute('data-active', '1');
+  els.alertText.classList.remove('is-placeholder');
+  put(els.alertText, q.text);
+  put(els.alertKind, 'student question \u2014 spoken aloud');
+
+  const bits = [];
+  if (q.latency_ms) bits.push(`llm ${msText(q.latency_ms)}`);
+  if (q.tier) bits.push(`voice ${q.tier}`);
+  bits.push('auto-dismiss 2s');
+  put(els.alertFoot, bits.join('  \u00b7  '));
+
+  put(els.liveAlert, `Student question: ${q.text}`);
+  window.clearTimeout(view.alertTimer);
+  view.alertTimer = window.setTimeout(() => hideAlert('dismissed'),
+                                      ALERT_MS);
+}
+
+function hideAlert(reason) {
+  window.clearTimeout(view.alertTimer);
+  if (els.alert.getAttribute('data-active') !== '1') return;
+  els.alert.setAttribute('data-active', '0');
+  els.alertText.classList.add('is-placeholder');
+  put(els.alertText, 'Waiting for a qualifying lecture turn\u2026');
+  put(els.alertKind, 'student question');
+  put(els.alertFoot, reason === 'dismissed' ? '' : '');
+}
+
+/* ---- metrics + counters ------------------------------------------------ */
+function applyMetrics(m) {
+  if (!m) return;
+  put(els.mStt, msText(m.stt_ms));
+  put(els.mLlm, msText(m.llm_ms));
+  put(els.mTts, msText(m.tts_ms));
+  put(els.mTotal, msText(m.total_ms));
+
+  const total = Number(m.total_ms) || 0;
+  const target = Number(m.target_ms) || 1500;
+  els.mTotal.setAttribute('data-ok', total > 0 && total <= target ? '1' : '0');
+  els.mTotal.setAttribute('data-over', total > target ? '1' : '0');
+
+  if (m.avg_ms) {
+    put(els.mAvg, `${msText(m.avg_ms)} / ${msText(m.best_ms)}`);
+  } else {
+    put(els.mAvg, EM);
+  }
+  if (m.cycles) {
+    const pct = Math.round(100 * (Number(m.within) || 0) / m.cycles);
+    put(els.mWithin, `${m.within}/${m.cycles} (${pct}%)`);
+    els.mWithin.setAttribute('data-ok', pct >= 80 ? '1' : '0');
+  } else {
+    put(els.mWithin, EM);
+  }
+}
+
+function applyCounters(c) {
+  if (!c) return;
+  put(els.cTurns, String(c.turns ?? 0));
+  put(els.cAsked, String(c.questions ?? 0));
+  const gated = (Number(c.thin) || 0) + (Number(c.gap) || 0) +
+    (Number(c.cadence) || 0);
+  put(els.cGated, String(gated));
+}
+
+/* ---- whiteboard panel --------------------------------------------------- */
+function boardSection(key, values, mono) {
+  if (!values || !values.length) return null;
+  const sec = document.createElement('div');
+  sec.className = 'board__sec';
+
+  const k = document.createElement('div');
+  k.className = 'board__k';
+  k.textContent = key;
+  sec.appendChild(k);
+
+  if (mono) {
+    for (const v of values) {
+      const box = document.createElement('div');
+      box.className = 'eq';
+      box.textContent = v;
+      sec.appendChild(box);
+    }
+  } else {
+    const row = document.createElement('div');
+    row.className = 'tag-row';
+    for (const v of values) {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = v;
+      row.appendChild(tag);
+    }
+    sec.appendChild(row);
+  }
+  return sec;
+}
+
+function applyBoard(b) {
+  if (!b) return;
+  const groups = [
+    ['equations', b.equations, true],
+    ['written terms', b.terms, false],
+    ['bullet points', b.bullets, false],
+    ['diagram', b.diagram ? [b.diagram] : null, false],
+  ];
+
+  const frag = document.createDocumentFragment();
+  let n = 0;
+  for (const [key, values, mono] of groups) {
+    const sec = boardSection(key, values, mono);
+    if (sec) { frag.appendChild(sec); n += 1; }
+  }
+
+  while (els.board.firstChild) els.board.removeChild(els.board.firstChild);
+  if (!n) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'Board is blank or unreadable in the current frame.';
+    els.board.appendChild(empty);
+  } else {
+    els.board.appendChild(frag);
+  }
+
+  put(els.boardChip,
+    `${n} section${n === 1 ? '' : 's'} \u00b7 ${clockText(b.ts)}`);
+}
+
+/* ---- errors (DESIGN.md 9) ---------------------------------------------- */
+function addError(msg) {
+  if (!msg) return;
+  const item = document.createElement('div');
+  item.className = 'errbox__item';
+  item.textContent = `${clockText()}  ${msg}`;
+  els.errbox.appendChild(item);
+  while (els.errbox.childElementCount > 8) {
+    els.errbox.removeChild(els.errbox.firstElementChild);
+  }
+  els.errbox.setAttribute('data-show', '1');
+}
+
+/* ---- waveform (DESIGN.md 7.4) ------------------------------------------ */
+function fitCanvas() {
+  const c = els.wave;
+  if (!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 640;
+  const h = 92;
+  const cw = Math.round(w * dpr);
+  const ch = Math.round(h * dpr);
+  if (c.width !== cw || c.height !== ch) {
+    c.width = cw;
+    c.height = ch;
+  }
+}
+
+function drawWave() {
+  requestAnimationFrame(drawWave);
+  const c = els.wave;
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  if (!ctx) return;
+
+  const W = c.width;
+  const H = c.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const mid = H / 2;
+  const gap = Math.max(1, Math.round(W / LEVEL_BARS * 0.28));
+  const bw = Math.max(2, (W / LEVEL_BARS) - gap);
+
+  // the floor line: measured silence, not a guess
+  if (view.floor !== null && view.levelsAvailable) {
+    const y = mid * (1 - Math.min(1, view.floor));
+    ctx.strokeStyle = 'rgba(120, 132, 156, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, Math.round(y) + 0.5);
+    ctx.lineTo(W, Math.round(y) + 0.5);
+    ctx.stroke();
+  }
+
+  for (let i = 0; i < LEVEL_BARS; i++) {
+    // critically-damped follow so the meter reads as physical, not jittery
+    const t = view.levels[i] || 0;
+    view.shown[i] += (t - view.shown[i]) * 0.28;
+    let v = view.shown[i];
+    if (v < 0.002) v = 0;
+
+    const h = Math.max(v * (mid - 2), v > 0 ? 1.5 : 0);
+    const x = i * (bw + gap);
+    const lit = v > 0.85;
+
+    ctx.fillStyle = lit
+      ? 'rgba(236, 132, 132, 0.95)'
+      : (view.levelsAvailable
+        ? 'rgba(126, 216, 176, 0.90)'
+        : 'rgba(120, 132, 156, 0.35)');
+    ctx.fillRect(x, mid - h, bw, h);          // upper half
+    ctx.fillRect(x, mid, bw, h * 0.55);       // mirrored, slightly damped
+  }
+
+  const a = els.waveWrap.getAttribute('data-available') === '1';
+  if (a !== view.levelsAvailable) {
+    els.waveWrap.setAttribute('data-available',
+      view.levelsAvailable ? '1' : '0');
+  }
+}
+
+/* ---- telemetry --------------------------------------------------------- */
+function applyTelemetry(t) {
+  if (!t) return;
+  put(els.factVram, t.vram_used_mb === null || t.vram_used_mb === undefined
+    ? EM
+    : `${(t.vram_used_mb / 1024).toFixed(1)}/${(t.vram_total_mb / 1024).toFixed(1)}G`);
+  els.factVram.setAttribute('data-warn',
+    (t.vram_used_mb !== null && t.vram_total_mb &&
+     t.vram_used_mb / t.vram_total_mb > 0.92) ? '1' : '0');
+  put(els.factCpu, t.cpu_pct === null || t.cpu_pct === undefined
+    ? EM : `${Math.round(t.cpu_pct)}%`);
+}
+
+function tickUptime() {
+  if (view.startedTs === null) { put(els.factUptime, EM); return; }
+  put(els.factUptime, clockDuration(Date.now() / 1000 - view.startedTs));
+}
+
+/* ---- SSE transport ------------------------------------------------------ */
+function handle(msg) {
+  const d = msg.data || {};
+  switch (msg.kind) {
+    case 'snapshot':
+      view.startedTs = d.started_ts ?? null;
+      if (d.model) put(els.factModel, d.model);
+      applyState(d.state || 'idle', d.note || '');
+      applyMetrics(d.metrics);
+      applyCounters(d.counters);
+      applyTelemetry(d.telemetry);
+      if (Array.isArray(d.transcript)) d.transcript.forEach(addLine);
+      if (Array.isArray(d.errors)) d.errors.forEach((e) => addError(e.text));
+      if (d.board) applyBoard(d.board);
+      if (d.question) showQuestion(d.question);
+      setLevels(d.levels, d.levels_available, d.floor);
+      break;
+    case 'state':
+      applyState(d.state, d.note);
+      break;
+    case 'session':
+      if (d.model) put(els.factModel, d.model);
+      if (d.started_ts) view.startedTs = d.started_ts;
+      break;
+    case 'transcript':
+      addLine(d);
+      break;
+    case 'question':
+      showQuestion(d);
+      break;
+    case 'question_resolved':
+      hideAlert(d.reason);
+      break;
+    case 'metrics':
+      applyMetrics(d);
+      break;
+    case 'counters':
+      applyCounters(d);
+      break;
+    case 'telemetry':
+      applyTelemetry(d);
+      break;
+    case 'levels':
+      setLevels(d.levels, d.levels_available, d.floor);
+      break;
+    case 'board':
+      applyBoard(d);
+      break;
+    case 'error':
+      addError(d.text);
+      break;
+    case 'ping':
+      break;
+    default:
+      break;
+  }
+}
+
+function setLevels(arr, available, floor) {
+  if (Array.isArray(arr) && arr.length) {
+    const n = Math.min(arr.length, LEVEL_BARS);
+    for (let i = 0; i < n; i++) {
+      const v = Number(arr[i]);
+      view.levels[i] = isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+    }
+  }
+  view.levelsAvailable = !!available;
+  view.floor = (floor === null || floor === undefined) ? null : Number(floor);
+  put(els.floorChip, view.levelsAvailable
+    ? `floor ${view.floor !== null ? Math.round(view.floor * 100) : 0}%`
+    : 'floor \u2014');
+}
+
+function connect() {
+  if (view.es) { view.es.close(); view.es = null; }
+  const es = new EventSource('/events');
+  view.es = es;
+
+  es.onopen = () => { view.retryMs = 1000; setConn(true); };
+
+  es.onmessage = (ev) => {
+    if (!ev.data) return;
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (err) { return; }
+    try { handle(msg); } catch (err) { addError(`hud client: ${err.message}`); }
+  };
+
+  es.onerror = () => {
+    setConn(false);
+    es.close();
+    view.es = null;
+    // exponential backoff, capped - the orchestrator may be restarting
+    const wait = view.retryMs;
+    view.retryMs = Math.min(view.retryMs * 1.7, 15000);
+    window.setTimeout(connect, wait);
+  };
+}
+
+/* ---- commands ----------------------------------------------------------- */
+function send(action) {
+  return fetch('/api/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: action }),
+  }).then((r) => r.json()).catch((err) => {
+    addError(`command '${action}' failed: ${err.message}`);
+    return null;
+  });
+}
+
+function bindControls() {
+  els.btnAsk.addEventListener('click', () => send('ask'));
+  els.btnMute.addEventListener('click', () => send('toggle_mute'));
+  els.btnSkip.addEventListener('click', () => {
+    hideAlert('dismissed');
+    send('dismiss');
+  });
+  els.btnClear.addEventListener('click', clearFeed);
+  els.btnStop.addEventListener('click', () => {
+    if (window.confirm('End the Socratic session and print the summary?')) {
+      send('stop');
+    }
+  });
+
+  window.addEventListener('keydown', (ev) => {
+    const tag = (ev.target && ev.target.tagName) || '';
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'BUTTON' ||
+        (ev.target && ev.target.isContentEditable)) return;
+
+    const k = ev.key.toLowerCase();
+    if (k === 'a') { send('ask'); ev.preventDefault(); }
+    else if (k === 'm' || ev.code === 'Space') {
+      send('toggle_mute'); ev.preventDefault();
+    } else if (k === 'd') {
+      hideAlert('dismissed'); send('dismiss'); ev.preventDefault();
+    } else if (k === 'c') { clearFeed(); ev.preventDefault(); }
+    else if (k === 's') {
+      if (window.confirm('End the Socratic session and print the summary?')) {
+        send('stop');
+      }
+      ev.preventDefault();
+    }
+  });
+
+  window.addEventListener('resize', fitCanvas);
+}
+
+/* ---- boot --------------------------------------------------------------- */
+function boot() {
+  fitCanvas();
+  requestAnimationFrame(drawWave);
+  bindControls();
+  applyState('idle', '');
+  connect();
+  window.setInterval(ageLines, 5000);
+  window.setInterval(tickUptime, 1000);
+  tickUptime();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  boot();
+}
+</script>
+</body>
+</html>
