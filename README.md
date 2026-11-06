@@ -188,3 +188,4 @@ This project is actively maintained and evolved as lesson planning needs grow. C
 ## 10. Contributing & Feedback
 
 Suggestions from fellow teachers, educators, and developers are welcome! If you have recommendations for pedagogical prompts, Socratic questioning strategies, or performance optimizations, please feel free to open an issue or submit a pull request.
+
