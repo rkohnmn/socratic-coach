@@ -1,0 +1,21 @@
+name: HUD security regression checks
+
+on:
+  pull_request:
+    paths:
+      - webui.py
+      - tests/test_hud_http_security.py
+      - .github/workflows/hud-security.yml
+
+permissions:
+  contents: read
+
+jobs:
+  hud:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Python stdlib self-test
+        run: python3 webui.py --selftest
+      - name: HTTP security regression tests
+        run: python3 -m unittest discover -s tests -p 'test_hud_http_security.py' -v
