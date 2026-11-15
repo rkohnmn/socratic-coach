@@ -683,17 +683,38 @@ class HudHandler(BaseHTTPRequestHandler):
         body = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
         self._send(status, body, "application/json; charset=utf-8")
 
-    def _read_json(self) -> dict:
+    def _trusted_request(self) -> bool:
+        """Block DNS-rebinding hosts and browser requests from other origins.
+
+        The HUD handles private transcript data and microphone controls. A
+        loopback bind alone does not make browser requests trustworthy.
+        Native local clients may omit Origin, but browsers must use the HUD's
+        own origin. These checks apply to reads, SSE, and mutations.
+        """
+        port = self.server.server_port
+        hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        host = self.headers.get("Host", "").strip().lower()
+        origin = self.headers.get("Origin")
+        allowed_origins = {f"http://{candidate}" for candidate in hosts}
+        if (host not in hosts or
+                (origin is not None and origin.strip().lower() not in allowed_origins)):
+            self.close_connection = True
+            self._send_json({"ok": False, "error": "untrusted HUD request source"}, 403)
+            return False
+        return True
+
+    def _read_json(self) -> dict | None:
         try:
             n = int(self.headers.get("Content-Length") or 0)
-        except Exception:
-            n = 0
+        except (TypeError, ValueError):
+            return None
         if n <= 0 or n > 65536:
-            return {}
+            return None
         try:
-            return json.loads(self.rfile.read(n).decode("utf-8")) or {}
-        except Exception:
-            return {}
+            payload = json.loads(self.rfile.read(n).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, OSError):
+            return None
+        return payload if isinstance(payload, dict) else None
 
     @staticmethod
     def _route(path: str) -> str:
@@ -701,6 +722,8 @@ class HudHandler(BaseHTTPRequestHandler):
 
     # -- GET -----------------------------------------------------------------
     def do_GET(self) -> None:                       # noqa: N802 (stdlib naming)
+        if not self._trusted_request():
+            return
         route = self._route(self.path)
         if route in ("/", "/hud.html", "/index.html"):
             try:
@@ -729,14 +752,26 @@ class HudHandler(BaseHTTPRequestHandler):
 
     # -- POST ----------------------------------------------------------------
     def do_POST(self) -> None:                      # noqa: N802
+        if not self._trusted_request():
+            return
         route = self._route(self.path)
+        if route not in ("/api/board", "/api/action"):
+            self._send_json({"ok": False, "error": "unknown endpoint"}, 404)
+            return
+        # text/plain is a cross-origin simple request: never parse it as JSON.
+        media_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if media_type != "application/json":
+            self.close_connection = True
+            self._send_json({"ok": False, "error": "application/json required"}, 415)
+            return
         if route == "/api/board":
             self._accept_board()
             return
-        if route != "/api/action":
-            self._send_json({"ok": False, "error": "unknown endpoint"}, 404)
+        payload = self._read_json()
+        if payload is None:
+            self._send_json({"ok": False, "error": "expected a JSON object"}, 400)
             return
-        action = self._read_json().get("action", "")
+        action = payload.get("action", "")
         try:
             self._send_json(self.bridge.push_action(action))
         except ValueError as exc:
@@ -745,9 +780,9 @@ class HudHandler(BaseHTTPRequestHandler):
     def _accept_board(self) -> None:
         """Board push from vision_tracker.py --web-publish (separate process).
 
-        Loopback-only like every other route, so an arbitrary web page cannot
-        reach it. Only the four documented keys are read, so an oversized or
-        malformed payload cannot poison the HUD state.
+        The HTTP handler checks Host, Origin and JSON media type before
+        accepting a payload. Only the four documented board keys are read
+        to keep the HUD state bounded and predictable.
         """
         payload = self._read_json()
         if not isinstance(payload, dict):
@@ -853,6 +888,8 @@ class HudServer:
             self._stop_flag.wait(max(0.0, period - (time.monotonic() - t0)))
 
     def start(self, open_browser: bool = False) -> "HudServer":
+        if self.host not in ("127.0.0.1", "localhost"):
+            raise ValueError("HUD may only bind to 127.0.0.1 or localhost")
         tel = self.bridge.telemetry
         if self._owns_telemetry and tel is not None:
             tel.start()
